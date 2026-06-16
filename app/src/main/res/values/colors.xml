@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="background">#1A1A1A</color>
+    <color name="surface">#2A2A2A</color>
+    <color name="surface_elevated">#333333</color>
+    <color name="primary_sos_red">#FF3B30</color>
+    <color name="primary_sos_dark">#B71C1C</color>
+    <color name="secondary_mesh_green">#34C759</color>
+    <color name="warning_orange">#FF9500</color>
+    <color name="info_blue">#007AFF</color>
+    <color name="text_primary">#FFFFFF</color>
+    <color name="text_secondary">#8E8E93</color>
+    <color name="text_tertiary">#48484A</color>
+    <color name="divider">#38383A</color>
+    <color name="overlay_dark">#E61A1A1A</color>
+    
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

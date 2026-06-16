@@ -1,0 +1,183 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:background="@color/surface"
+    android:padding="24dp">
+
+    <!-- Drag handle -->
+    <View
+        android:layout_width="40dp"
+        android:layout_height="4dp"
+        android:layout_gravity="center_horizontal"
+        android:background="@color/divider"
+        android:layout_marginBottom="16dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="SETTINGS"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/text_headline"
+        android:textStyle="bold"
+        android:layout_gravity="center_horizontal"
+        android:layout_marginBottom="24dp"/>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Your Codename"
+        android:textColorHint="@color/text_secondary"
+        app:boxStrokeColor="@color/text_secondary"
+        app:hintTextColor="@color/text_primary"
+        android:layout_marginBottom="16dp"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/etName"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:textColor="@color/text_primary"/>
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <com.google.android.material.textfield.TextInputLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Secure Channel ID"
+        android:textColorHint="@color/text_secondary"
+        app:boxStrokeColor="@color/text_secondary"
+        app:hintTextColor="@color/text_primary"
+        android:layout_marginBottom="24dp"
+        style="@style/Widget.Material3.TextInputLayout.OutlinedBox">
+
+        <com.google.android.material.textfield.TextInputEditText
+            android:id="@+id/etChannel"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="PUBLIC"
+            android:textColor="@color/secondary_mesh_green"/>
+    </com.google.android.material.textfield.TextInputLayout>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/divider"
+        android:layout_marginBottom="16dp"/>
+
+    <com.google.android.material.materialswitch.MaterialSwitch
+        android:id="@+id/swSentinel"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Background Sentinel Mode"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/text_body"
+        android:layout_marginBottom="16dp"/>
+
+    <com.google.android.material.materialswitch.MaterialSwitch
+        android:id="@+id/cbPrivacy"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Incognito Mode (Hide Name)"
+        android:textColor="@color/text_primary"
+        android:textSize="@dimen/text_body"
+        android:layout_marginBottom="24dp"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/divider"
+        android:layout_marginBottom="24dp"/>
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="TACTICAL TOOLS"
+        android:textColor="@color/text_secondary"
+        android:textSize="@dimen/text_caption"
+        android:layout_marginBottom="16dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnFlare"
+            android:layout_width="0dp"
+            android:layout_height="60dp"
+            android:layout_weight="1"
+            android:text="FLARE"
+            android:textColor="@color/warning_orange"
+            app:icon="@drawable/ic_flare"
+            app:iconTint="@color/warning_orange"
+            app:strokeColor="@color/warning_orange"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_marginEnd="8dp"/>
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btnStrobe"
+            android:layout_width="0dp"
+            android:layout_height="60dp"
+            android:layout_weight="1"
+            android:text="STROBE"
+            android:textColor="@color/text_primary"
+            app:icon="@drawable/ic_flashlight"
+            app:iconTint="@color/text_primary"
+            app:strokeColor="@color/divider"
+            style="@style/Widget.Material3.Button.OutlinedButton"
+            android:layout_marginStart="8dp"/>
+    </LinearLayout>
+
+    <com.google.android.material.button.MaterialButton
+        android:id="@+id/btnDownloadMap"
+        android:layout_width="match_parent"
+        android:layout_height="60dp"
+        android:text="DOWNLOAD OFFLINE MAP"
+        android:textColor="@color/text_primary"
+        app:icon="@drawable/ic_download"
+        app:iconTint="@color/text_primary"
+        app:backgroundTint="@color/info_blue"
+        style="@style/Widget.Material3.Button.TonalButton"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="24dp"/>
+
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/divider"
+        android:layout_marginBottom="24dp"/>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginBottom="16dp">
+
+        <ImageView
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:src="@drawable/ic_shield"
+            app:tint="@color/secondary_mesh_green"
+            android:layout_marginEnd="8dp"/>
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Play Protect Certified"
+            android:textColor="@color/secondary_mesh_green"
+            android:textStyle="bold"
+            android:textSize="@dimen/text_body"/>
+    </LinearLayout>
+
+    <TextView
+        android:id="@+id/tvVersion"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="Version 1.0.0"
+        android:textColor="@color/text_secondary"
+        android:textSize="@dimen/text_caption"
+        android:layout_gravity="center_horizontal"/>
+</LinearLayout>

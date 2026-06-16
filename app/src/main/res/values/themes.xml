@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- OffSOS Dark Tactical Theme — Material 3 -->
+    <style name="Base.Theme.OFFSOS" parent="Theme.Material3.Dark.NoActionBar">
+        <!-- Primary (SOS Red) -->
+        <item name="colorPrimary">@color/primary_sos_red</item>
+        <item name="colorOnPrimary">@color/text_primary</item>
+        <item name="colorPrimaryContainer">@color/primary_sos_dark</item>
+        <item name="colorOnPrimaryContainer">@color/text_primary</item>
+
+        <!-- Secondary (Mesh Green) -->
+        <item name="colorSecondary">@color/secondary_mesh_green</item>
+        <item name="colorOnSecondary">@color/background</item>
+        <item name="colorSecondaryContainer">@color/secondary_mesh_green</item>
+        <item name="colorOnSecondaryContainer">@color/text_primary</item>
+
+        <!-- Tertiary (Warning Orange) -->
+        <item name="colorTertiary">@color/warning_orange</item>
+        <item name="colorOnTertiary">@color/background</item>
+
+        <!-- Error -->
+        <item name="colorError">@color/primary_sos_red</item>
+        <item name="colorOnError">@color/text_primary</item>
+
+        <!-- Background & Surface -->
+        <item name="android:colorBackground">@color/background</item>
+        <item name="colorOnBackground">@color/text_primary</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorSurfaceVariant">@color/surface_elevated</item>
+        <item name="colorOnSurfaceVariant">@color/text_secondary</item>
+        <item name="colorOutline">@color/divider</item>
+
+        <!-- Status bar -->
+        <item name="android:statusBarColor">@color/background</item>
+        <item name="android:navigationBarColor">@color/background</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+
+    <style name="Theme.OFFSOS" parent="Base.Theme.OFFSOS" />
+</resources>
