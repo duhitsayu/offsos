@@ -297,7 +297,7 @@ appears in all copies.
 
 **Built for the moments when everything else fails.**
 
-[Report a Bug](https://github.com/duhitsayu/offsos/issues) · [Request a Feature](https://github.com/duhitsayu/offsos/issues) · [Discussions](https://github.com/duhitsayu/offsos/discussions)
+[Report a Bug](https://github.com/duhitsayu/offsos/issues) · [Suggest a Feature](https://github.com/duhitsayu/offsos/issues) · [Discussions](https://github.com/duhitsayu/offsos/discussions)
 
 <br>
 
