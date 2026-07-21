@@ -38,7 +38,8 @@ Device A ──────────── Device B ────────�
 
 ## The Problem
 
-When disaster strikes — a flood, an earthquake, a trekking emergency — the first thing that fails is the network. Cell towers go down. WiFi disappears. The people who need help the most lose the ability to call for it.
+When disaster strikes—whether it's a flood, earthquake, or a remote trekking emergency—the first thing to fail is often communication. Cell towers go offline. Wi-Fi disappears. In the moments when people need help the most, they lose the ability to ask for it.
+
 
 **OffSOS exists for exactly that moment.**
 
