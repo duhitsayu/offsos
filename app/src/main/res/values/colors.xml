@@ -1,19 +1,49 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- ══════════════════════════════════════════════════════════ -->
+    <!-- OffSOS Original Tactical Red Palette (User Screenshot)     -->
+    <!-- ══════════════════════════════════════════════════════════ -->
+
+    <!-- Backgrounds -->
     <color name="background">#1A1A1A</color>
-    <color name="surface">#2A2A2A</color>
-    <color name="surface_elevated">#333333</color>
+    <color name="surface">#2A2222</color> <!-- Dark warm charcoal for bottom dock -->
+    <color name="surface_elevated">#222222</color> <!-- Dark charcoal for top pill -->
+    <color name="surface_glass">#E6222222</color>
+
+    <!-- Primary — Emergency Red (Matching Screenshot) -->
+    <color name="primary_purple">#C62828</color> <!-- Main SOS Button Red -->
+    <color name="primary_purple_light">#E53935</color>
+    <color name="primary_purple_dark">#8B0000</color>
+    <color name="primary_purple_glow">#40C62828</color>
+
+    <!-- Danger Zone Button — Bright Red -->
     <color name="primary_sos_red">#FF3B30</color>
     <color name="primary_sos_dark">#B71C1C</color>
+    <color name="sos_glow">#40FF3B30</color>
+
+    <!-- Status — Vibrant Green Dot -->
     <color name="secondary_mesh_green">#34C759</color>
+    <color name="mesh_green_glow">#4034C759</color>
+
+    <!-- Warning — Orange -->
     <color name="warning_orange">#FF9500</color>
+
+    <!-- Info — Blue -->
     <color name="info_blue">#007AFF</color>
+
+    <!-- Text -->
     <color name="text_primary">#FFFFFF</color>
-    <color name="text_secondary">#8E8E93</color>
-    <color name="text_tertiary">#48484A</color>
+    <color name="text_secondary">#D0D0D0</color>
+    <color name="text_tertiary">#8E8E93</color>
+
+    <!-- Borders & Dividers -->
     <color name="divider">#38383A</color>
+    <color name="border_purple">#38383A</color>
+
+    <!-- Overlay -->
     <color name="overlay_dark">#E61A1A1A</color>
-    
+
+    <!-- Standard -->
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 </resources>

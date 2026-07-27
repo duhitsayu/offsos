@@ -1,6 +1,8 @@
 package com.vaav.offsos
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -13,9 +15,25 @@ data class RemoteUser(val id: String, val lat: Double, val lon: Double, val name
 data class DangerZone(val lat: Double, val lon: Double)
 
 class MeshRepository(private val context: Context) {
+    companion object {
+        private const val TAG = "MeshRepository"
+        private const val MAX_RETRY_ATTEMPTS = 3
+    }
+
     private val connectionsClient = Nearby.getConnectionsClient(context)
     private val SERVICE_ID = "com.vaav.offsos"
+    private val retryHandler = Handler(Looper.getMainLooper())
 
+    // --- Connection identity (set before advertising/discovery) ---
+    private var myChannel: String = "PUBLIC"
+    private var myName: String = ""
+
+    // --- Connection state tracking ---
+    private val pendingConnections = mutableSetOf<String>()    // endpoints we're currently connecting to
+    private val retryQueue = mutableMapOf<String, Int>()       // endpointId → attempt count
+    private val discoveredEndpoints = mutableMapOf<String, DiscoveredEndpointInfo>()  // still-visible endpoints
+
+    // --- Observable state ---
     private val _connectedEndpoints = MutableLiveData<Set<String>>(emptySet())
     val connectedEndpoints: LiveData<Set<String>> get() = _connectedEndpoints
 
@@ -34,37 +52,52 @@ class MeshRepository(private val context: Context) {
     private val _systemMessage = MutableLiveData<String>()
     val systemMessage: LiveData<String> get() = _systemMessage
 
-    private val _foundEndpoint = MutableLiveData<Pair<String, DiscoveredEndpointInfo>>()
-    val foundEndpoint: LiveData<Pair<String, DiscoveredEndpointInfo>> get() = _foundEndpoint
-
-    private val _connectionRequest = MutableLiveData<Pair<String, ConnectionInfo>>()
-    val connectionRequest: LiveData<Pair<String, ConnectionInfo>> get() = _connectionRequest
-
     private val incomingFilePayloads = androidx.collection.SimpleArrayMap<Long, Payload>()
 
-    fun startAdvertising(channel: String, myName: String) {
+    // =========================================================================
+    // Public API
+    // =========================================================================
+
+    fun setIdentity(channel: String, name: String) {
+        myChannel = channel.uppercase().trim().ifEmpty { "PUBLIC" }
+        myName = name
+    }
+
+    fun startAdvertising(channel: String, name: String) {
+        setIdentity(channel, name)
         val options = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
-        val broadcastName = "$channel|$myName"
+        val broadcastName = "$myChannel|$myName"
         connectionsClient.startAdvertising(broadcastName, SERVICE_ID, connectionLifecycleCallback, options)
-            .addOnFailureListener { e -> _systemMessage.postValue("Advertising Failed: ${e.message}") }
+            .addOnSuccessListener { Log.d(TAG, "Advertising started as: $broadcastName") }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "Advertising failed", e)
+                _systemMessage.postValue("Advertising Failed: ${e.message}")
+            }
     }
 
     fun startDiscovery() {
         val options = DiscoveryOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
         connectionsClient.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
-            .addOnFailureListener { e -> _systemMessage.postValue("Discovery Failed: ${e.message}") }
+            .addOnSuccessListener { Log.d(TAG, "Discovery started") }
+            .addOnFailureListener { e ->
+                Log.e(TAG, "Discovery failed", e)
+                _systemMessage.postValue("Discovery Failed: ${e.message}")
+            }
     }
 
     fun stopAdvertising() = connectionsClient.stopAdvertising()
     fun stopDiscovery() = connectionsClient.stopDiscovery()
 
-    fun requestConnection(myName: String, endpointId: String) {
-        connectionsClient.requestConnection(myName, endpointId, connectionLifecycleCallback)
-            .addOnFailureListener { e -> _systemMessage.postValue("Connection Failed: ${e.message}") }
-    }
-
-    fun acceptConnection(endpointId: String) {
-        connectionsClient.acceptConnection(endpointId, payloadCallback)
+    fun stopAll() {
+        connectionsClient.stopAdvertising()
+        connectionsClient.stopDiscovery()
+        connectionsClient.stopAllEndpoints()
+        pendingConnections.clear()
+        retryQueue.clear()
+        discoveredEndpoints.clear()
+        retryHandler.removeCallbacksAndMessages(null)
+        _connectedEndpoints.postValue(emptySet())
+        _remoteUsers.postValue(emptyMap())
     }
 
     fun sendPayloadToAll(payload: Payload) {
@@ -84,28 +117,132 @@ class MeshRepository(private val context: Context) {
         _dangerZones.postValue(zones)
     }
 
+    // =========================================================================
+    // Safe connection request — deduplicates and retries
+    // =========================================================================
+
+    private fun requestConnectionSafe(endpointId: String) {
+        val connected = _connectedEndpoints.value ?: emptySet()
+        if (endpointId in connected) {
+            Log.d(TAG, "Already connected to $endpointId, skipping")
+            return
+        }
+        if (endpointId in pendingConnections) {
+            Log.d(TAG, "Already connecting to $endpointId, skipping")
+            return
+        }
+
+        pendingConnections.add(endpointId)
+        Log.d(TAG, "Requesting connection to $endpointId (pending: ${pendingConnections.size})")
+
+        connectionsClient.requestConnection(myName, endpointId, connectionLifecycleCallback)
+            .addOnFailureListener { e ->
+                Log.e(TAG, "requestConnection failed for $endpointId: ${e.message}")
+                pendingConnections.remove(endpointId)
+
+                // If the endpoint is still visible, schedule a retry
+                if (endpointId in discoveredEndpoints) {
+                    scheduleRetry(endpointId)
+                }
+            }
+    }
+
+    private fun scheduleRetry(endpointId: String) {
+        val attempts = retryQueue.getOrDefault(endpointId, 0)
+        if (attempts >= MAX_RETRY_ATTEMPTS) {
+            Log.w(TAG, "Max retries reached for $endpointId, giving up")
+            retryQueue.remove(endpointId)
+            _systemMessage.postValue("Connection Failed after $MAX_RETRY_ATTEMPTS attempts")
+            return
+        }
+        retryQueue[endpointId] = attempts + 1
+        val delay = (attempts + 1) * 2000L  // 2s, 4s, 6s backoff
+        Log.d(TAG, "Scheduling retry #${attempts + 1} for $endpointId in ${delay}ms")
+        retryHandler.postDelayed({
+            // Only retry if endpoint is still visible and not connected
+            val connected = _connectedEndpoints.value ?: emptySet()
+            if (endpointId in discoveredEndpoints && endpointId !in connected) {
+                requestConnectionSafe(endpointId)
+            } else {
+                retryQueue.remove(endpointId)
+            }
+        }, delay)
+    }
+
+    // =========================================================================
+    // Discovery callback — auto-connects matching endpoints
+    // =========================================================================
+
     private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
         override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
-            _foundEndpoint.postValue(Pair(endpointId, info))
+            Log.d(TAG, "Endpoint found: $endpointId name=${info.endpointName}")
+            discoveredEndpoints[endpointId] = info
+
+            val foundName = info.endpointName
+            val remoteInfo = foundName.split("|", limit = 2)
+
+            val shouldConnect = if (remoteInfo.size == 2) {
+                val remoteChannel = remoteInfo[0].uppercase().trim()
+                remoteChannel == myChannel
+            } else {
+                myChannel == "PUBLIC"
+            }
+
+            if (shouldConnect) {
+                _systemMessage.postValue("Found Signal: $foundName")
+                requestConnectionSafe(endpointId)
+            } else {
+                Log.d(TAG, "Channel mismatch: remote=${remoteInfo.getOrNull(0)} mine=$myChannel")
+            }
         }
-        override fun onEndpointLost(endpointId: String) {}
+
+        override fun onEndpointLost(endpointId: String) {
+            Log.d(TAG, "Endpoint lost: $endpointId")
+            discoveredEndpoints.remove(endpointId)
+            retryQueue.remove(endpointId)
+        }
     }
+
+    // =========================================================================
+    // Connection lifecycle — auto-accepts, tracks state
+    // =========================================================================
 
     private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
-            _connectionRequest.postValue(Pair(endpointId, info))
+            Log.d(TAG, "Connection initiated with $endpointId (${info.endpointName})")
+            // Mark as pending if not already (happens when we're the advertiser receiving a connection)
+            pendingConnections.add(endpointId)
+            // Auto-accept ALL connections — this is critical for multi-device
+            connectionsClient.acceptConnection(endpointId, payloadCallback)
+            _systemMessage.postValue("Connecting: ${info.endpointName}")
         }
 
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
+            pendingConnections.remove(endpointId)
+
             if (result.status.isSuccess) {
+                Log.d(TAG, "Connected to $endpointId!")
+                retryQueue.remove(endpointId)  // Clear any pending retries
+
                 val current = _connectedEndpoints.value?.toMutableSet() ?: mutableSetOf()
                 current.add(endpointId)
                 _connectedEndpoints.postValue(current)
                 _systemMessage.postValue("MESH_CONNECTED:$endpointId")
+            } else {
+                Log.w(TAG, "Connection to $endpointId failed: status=${result.status.statusCode}")
+                _systemMessage.postValue("Connection rejected: $endpointId")
+
+                // Retry if endpoint is still visible
+                if (endpointId in discoveredEndpoints) {
+                    scheduleRetry(endpointId)
+                }
             }
         }
 
         override fun onDisconnected(endpointId: String) {
+            Log.d(TAG, "Disconnected from $endpointId")
+            pendingConnections.remove(endpointId)
+
             val current = _connectedEndpoints.value?.toMutableSet() ?: mutableSetOf()
             current.remove(endpointId)
             _connectedEndpoints.postValue(current)
@@ -113,10 +250,26 @@ class MeshRepository(private val context: Context) {
             val users = _remoteUsers.value?.toMutableMap() ?: mutableMapOf()
             users.remove(endpointId)
             _remoteUsers.postValue(users)
-            
+
             _systemMessage.postValue("Signal Lost")
+
+            // If endpoint is still visible, try to reconnect
+            if (endpointId in discoveredEndpoints) {
+                retryQueue.remove(endpointId) // Reset retry count for reconnection
+                retryHandler.postDelayed({
+                    val connected = _connectedEndpoints.value ?: emptySet()
+                    if (endpointId in discoveredEndpoints && endpointId !in connected) {
+                        Log.d(TAG, "Attempting to reconnect to $endpointId")
+                        requestConnectionSafe(endpointId)
+                    }
+                }, 3000L)
+            }
         }
     }
+
+    // =========================================================================
+    // Payload handling
+    // =========================================================================
 
     private val payloadCallback = object : PayloadCallback() {
         override fun onPayloadReceived(endpointId: String, payload: Payload) {
@@ -131,7 +284,9 @@ class MeshRepository(private val context: Context) {
                         val currentUsers = _remoteUsers.value?.toMutableMap() ?: mutableMapOf()
                         currentUsers[endpointId] = RemoteUser(endpointId, lat, lon, name)
                         _remoteUsers.postValue(currentUsers)
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to parse LOC", e)
+                    }
                 } else if (data.startsWith("MSG:")) {
                     try {
                         val parts = data.split(":", limit = 3)
@@ -139,7 +294,9 @@ class MeshRepository(private val context: Context) {
                         val currentMsgs = _chatMessages.value ?: ""
                         _chatMessages.postValue(currentMsgs + "\n" + msg)
                         _systemMessage.postValue("Msg from ${parts[1]}")
-                    } catch (e: Exception) {}
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to parse MSG", e)
+                    }
                 } else if (data.startsWith("DANGER:")) {
                     try {
                         val parts = data.substring(7).split(",")

@@ -17,8 +17,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val dangerZones = repository.dangerZones
     val receivedAudioFile = repository.receivedAudioFile
     val systemMessage = repository.systemMessage
-    val foundEndpoint = repository.foundEndpoint
-    val connectionRequest = repository.connectionRequest
 
     private val _isBroadcasting = MutableLiveData(false)
     val isBroadcasting: LiveData<Boolean> get() = _isBroadcasting
@@ -37,6 +35,14 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setLocation(location: Location) {
         _myLastLocation.value = location
+    }
+
+    /**
+     * Set the channel and codename so MeshRepository knows who we are
+     * for channel-matching during discovery. Call this before starting discovery.
+     */
+    fun setChannelAndName(channel: String, name: String) {
+        repository.setIdentity(channel, name)
     }
 
     fun toggleSosMode(channel: String, myName: String) {
@@ -62,24 +68,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     
     fun setStrobing(isStrobing: Boolean) {
         _isStrobing.value = isStrobing
-    }
-
-    fun handleEndpointFound(myChannel: String, myName: String, endpointId: String, endpointName: String) {
-        val remoteInfo = endpointName.split("|", limit = 2)
-        if (remoteInfo.size == 2) {
-            val remoteChannel = remoteInfo[0].uppercase().trim()
-            if (remoteChannel == myChannel) {
-                repository.requestConnection(myName, endpointId)
-            }
-        } else {
-            if (myChannel == "PUBLIC") {
-                repository.requestConnection(myName, endpointId)
-            }
-        }
-    }
-
-    fun acceptConnection(endpointId: String) {
-        repository.acceptConnection(endpointId)
     }
 
     fun sendMessage(msg: String, myName: String) {
@@ -111,7 +99,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         repository.sendPayloadToAll(payload)
     }
     
-    fun startDiscovery() {
+    fun startDiscovery(channel: String, name: String) {
+        repository.setIdentity(channel, name)
         repository.startDiscovery()
+    }
+
+    fun stopAll() {
+        repository.stopAll()
     }
 }

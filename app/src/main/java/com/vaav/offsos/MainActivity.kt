@@ -8,7 +8,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.content.res.ColorStateList
 import android.graphics.Color
 import android.location.Location
 import android.media.AudioManager
@@ -25,25 +24,18 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.SoundEffectConstants
 import android.view.View
-import android.widget.Button
-import android.widget.CheckBox
 import android.widget.EditText
-import android.widget.ImageButton
-import android.widget.LinearLayout
-import android.widget.ScrollView
-import android.widget.Switch
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
-import androidx.collection.SimpleArrayMap
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModelProvider
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
-import com.google.android.gms.nearby.Nearby
-import com.google.android.gms.nearby.connection.*
+import com.google.android.gms.nearby.connection.Payload
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.cachemanager.CacheManager
 import org.osmdroid.util.BoundingBox
@@ -64,6 +56,8 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
     private lateinit var tvStatus: TextView
     private lateinit var map: MapView
     private lateinit var cardSos: CardView
+    private lateinit var sosGlow: View
+    private lateinit var sosContainer: View
 
     // Settings Menu
     private lateinit var btnMenu: View
@@ -84,7 +78,7 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
     private lateinit var tvMic: TextView
 
     // --- LOGIC TOOLS ---
-    private lateinit var connectionsClient: ConnectionsClient
+    private lateinit var viewModel: MainViewModel
     private lateinit var fusedLocationClient: FusedLocationProviderClient
 
     private var mediaRecorder: MediaRecorder? = null
@@ -92,20 +86,18 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
     private var lastAudioFile: File? = null
     private var lastAudioUri: android.net.Uri? = null
     private var isRecording = false
-    private val incomingFilePayloads = SimpleArrayMap<Long, Payload>()
     private var connectionMediaPlayer: MediaPlayer? = null
 
     private var myMarker: Marker? = null
     private val activeMarkers = HashMap<String, Marker>()
-    private val dangerZones = ArrayList<Polygon>()
+    private val dangerPolygons = ArrayList<Polygon>()
     private var myLastLocation: Location? = null
 
     private val handler = Handler(Looper.getMainLooper())
-    private val SERVICE_ID = "com.vaav.offsos"
     private var isBroadcasting = false
-    private val connectedEndpoints = ArrayList<String>()
     private var isChatMode = false
     private var isStrobing = false
+    private var isLocationRunning = false  // Guard against stacked location runnables
 
     private val REQUIRED_PERMISSIONS = if (Build.VERSION.SDK_INT >= 33) {
         arrayOf(
@@ -170,16 +162,122 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
             stopConnectionSiren()
         }
 
+        // Initialize ViewModel — single source of truth for connections
+        viewModel = ViewModelProvider(this)[MainViewModel::class.java]
+
         initViews()
         initMap()
         createNotificationChannel()
 
-        connectionsClient = Nearby.getConnectionsClient(this)
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
+        // Set identity on the repository so it knows our channel for matching
+        val sharedPrefs = getSharedPreferences("OFFSOS_PREFS", Context.MODE_PRIVATE)
+        val channel = (sharedPrefs.getString("channel", "PUBLIC") ?: "PUBLIC").uppercase().trim().ifEmpty { "PUBLIC" }
+        val name = sharedPrefs.getString("codename", "") ?: ""
+        viewModel.setChannelAndName(channel, name)
+
         if (hasPermissions(this)) {
-            startDiscovery()
+            viewModel.startDiscovery(channel, name)
             updateMyLocation()
+        }
+
+        // --- Observe ViewModel LiveData ---
+        observeViewModel()
+    }
+
+    // =========================================================================
+    // ViewModel Observers — replaces all the duplicate callback logic
+    // =========================================================================
+
+    private fun observeViewModel() {
+        // Connected endpoints changed
+        viewModel.connectedEndpoints.observe(this) { endpoints ->
+            val count = endpoints.size
+            if (!isBroadcasting) {
+                tvStatus.text = "🟢 ONLINE • $count peers"
+            }
+            if (count > 0 && !isLocationRunning) {
+                isLocationRunning = true
+                handler.post(sendLocationRunnable)
+            }
+            // Clean up markers for disconnected endpoints
+            val removedIds = activeMarkers.keys.filter { it !in endpoints }
+            for (id in removedIds) {
+                activeMarkers[id]?.let { map.overlays.remove(it) }
+                activeMarkers.remove(id)
+            }
+            if (removedIds.isNotEmpty()) map.invalidate()
+        }
+
+        // System messages (connection events, errors, etc.)
+        viewModel.systemMessage.observe(this) { message ->
+            if (message.isNullOrEmpty()) return@observe
+            when {
+                message.startsWith("MESH_CONNECTED:") -> {
+                    val endpointId = message.substringAfter("MESH_CONNECTED:")
+                    btnSos.playSoundEffect(SoundEffectConstants.NAVIGATION_UP)
+                    Toast.makeText(this, "MESH CONNECTED", Toast.LENGTH_SHORT).show()
+                    if (!isBroadcasting) triggerRescuerAlarm(endpointId)
+                }
+                message == "Signal Lost" -> {
+                    Toast.makeText(this, "Signal Lost", Toast.LENGTH_SHORT).show()
+                }
+                message.startsWith("Found Signal:") -> {
+                    Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+                }
+                message.startsWith("Msg from ") -> {
+                    if (!isChatMode) Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+                }
+                message == "DANGER_ZONE_RECEIVED" -> {
+                    // Handled via dangerZones observer
+                }
+                message == "Danger Zone Cleared" -> {
+                    Toast.makeText(this, "Danger Zone Cleared", Toast.LENGTH_SHORT).show()
+                }
+                else -> {
+                    // Show any other system messages as toasts
+                    if (!message.startsWith("Connecting:")) {
+                        Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+                    }
+                }
+            }
+        }
+
+        // Remote users — update map markers
+        viewModel.remoteUsers.observe(this) { users ->
+            for ((id, user) in users) {
+                updateRemoteUserMarker(id, user.lat, user.lon, user.name)
+            }
+        }
+
+        // Chat messages
+        viewModel.chatMessages.observe(this) { messages ->
+            if (!messages.isNullOrEmpty()) {
+                tvChatLog.text = messages
+            }
+        }
+
+        // Danger zones
+        viewModel.dangerZones.observe(this) { zones ->
+            // Clear existing polygons and redraw
+            clearAllDangerZones()
+            for (zone in zones) {
+                drawDangerZone(zone.lat, zone.lon)
+            }
+            if (zones.isNotEmpty()) {
+                Toast.makeText(this, "⚠️ DANGER ZONE RECEIVED!", Toast.LENGTH_LONG).show()
+            }
+        }
+
+        // Received audio files
+        viewModel.receivedAudioFile.observe(this) { file ->
+            if (file != null && file.exists()) {
+                lastAudioFile = file
+                lastAudioUri = null
+                btnPlayAudio.visibility = View.VISIBLE
+                playReceivedAudio(file, null)
+            }
         }
     }
 
@@ -188,6 +286,8 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
         btnSos = findViewById(R.id.btnSos)
         tvSosText = findViewById(R.id.tvSosText)
         cardSos = findViewById(R.id.cardSos)
+        sosGlow = findViewById(R.id.sosGlow)
+        sosContainer = findViewById(R.id.sosContainer)
         tvStatus = findViewById(R.id.tvStatus)
         map = findViewById(R.id.map)
 
@@ -208,10 +308,24 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
 
         tvChatLog.movementMethod = ScrollingMovementMethod()
 
-        btnMenu.setOnClickListener {
-            val bottomSheet = SettingsBottomSheet()
-            bottomSheet.listener = this
-            bottomSheet.show(supportFragmentManager, SettingsBottomSheet.TAG)
+        btnMenu.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.animate().scaleX(0.82f).scaleY(0.82f).rotation(45f).setDuration(90).start()
+                }
+                MotionEvent.ACTION_UP -> {
+                    v.animate().scaleX(1.0f).scaleY(1.0f).rotation(0f).setDuration(180)
+                        .setInterpolator(android.view.animation.OvershootInterpolator(2.5f)).start()
+                    v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    val bottomSheet = SettingsBottomSheet()
+                    bottomSheet.listener = this
+                    bottomSheet.show(supportFragmentManager, SettingsBottomSheet.TAG)
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    v.animate().scaleX(1.0f).scaleY(1.0f).rotation(0f).setDuration(150).start()
+                }
+            }
+            true
         }
 
         btnStopAlarm.setOnClickListener {
@@ -220,32 +334,58 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
             Toast.makeText(this, "Alarm Silenced", Toast.LENGTH_SHORT).show()
         }
 
-        btnSos.setOnClickListener {
-            it.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-            it.playSoundEffect(SoundEffectConstants.CLICK)
+        btnSos.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    cardSos.animate().scaleX(0.88f).scaleY(0.88f).setDuration(80).start()
+                }
+                MotionEvent.ACTION_UP -> {
+                    cardSos.animate().scaleX(1.0f).scaleY(1.0f).setDuration(180)
+                        .setInterpolator(android.view.animation.OvershootInterpolator(3.0f)).start()
+                    v.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                    v.playSoundEffect(SoundEffectConstants.CLICK)
 
-            val sharedPrefs = getSharedPreferences("OFFSOS_PREFS", Context.MODE_PRIVATE)
-            val name = sharedPrefs.getString("codename", "") ?: ""
+                    val sharedPrefs = getSharedPreferences("OFFSOS_PREFS", Context.MODE_PRIVATE)
+                    val name = sharedPrefs.getString("codename", "") ?: ""
 
-            if (name.isEmpty()) {
-                Toast.makeText(this, "Codename Required. Please set it in Settings.", Toast.LENGTH_LONG).show()
-                val bottomSheet = SettingsBottomSheet()
-                bottomSheet.listener = this
-                bottomSheet.show(supportFragmentManager, SettingsBottomSheet.TAG)
-                return@setOnClickListener
+                    if (name.isEmpty()) {
+                        Toast.makeText(this, "Codename Required. Please set it in Settings.", Toast.LENGTH_LONG).show()
+                        val bottomSheet = SettingsBottomSheet()
+                        bottomSheet.listener = this
+                        bottomSheet.show(supportFragmentManager, SettingsBottomSheet.TAG)
+                    } else {
+                        if (hasPermissions(this)) toggleSosMode() else requestPermissions()
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    cardSos.animate().scaleX(1.0f).scaleY(1.0f).setDuration(150).start()
+                }
             }
-
-            if (hasPermissions(this)) toggleSosMode() else requestPermissions()
+            true
         }
 
-        btnToggleChat.setOnClickListener {
-            isChatMode = !isChatMode
-            if (isChatMode) {
-                layoutChat.visibility = View.VISIBLE
-                layoutChat.bringToFront()
-            } else {
-                layoutChat.visibility = View.GONE
+        btnToggleChat.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    v.animate().scaleX(0.90f).scaleY(0.90f).setDuration(80).start()
+                }
+                MotionEvent.ACTION_UP -> {
+                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(160)
+                        .setInterpolator(android.view.animation.OvershootInterpolator(2.0f)).start()
+                    v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    isChatMode = !isChatMode
+                    if (isChatMode) {
+                        layoutChat.visibility = View.VISIBLE
+                        layoutChat.bringToFront()
+                    } else {
+                        layoutChat.visibility = View.GONE
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(150).start()
+                }
             }
+            true
         }
 
         btnChatClose.setOnClickListener {
@@ -253,21 +393,47 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
             isChatMode = false
         }
 
-        btnDanger.setOnClickListener { broadcastDangerZone() }
-        btnDanger.setOnLongClickListener {
+        var isDangerLongPress = false
+        val dangerLongPressRunnable = Runnable {
+            isDangerLongPress = true
+            btnDanger.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             broadcastSafeZone()
+        }
+
+        btnDanger.setOnTouchListener { v, event ->
+            when (event.action) {
+                MotionEvent.ACTION_DOWN -> {
+                    isDangerLongPress = false
+                    v.animate().scaleX(0.82f).scaleY(0.82f).setDuration(80).start()
+                    handler.postDelayed(dangerLongPressRunnable, android.view.ViewConfiguration.getLongPressTimeout().toLong())
+                }
+                MotionEvent.ACTION_UP -> {
+                    handler.removeCallbacks(dangerLongPressRunnable)
+                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(160)
+                        .setInterpolator(android.view.animation.OvershootInterpolator(2.5f)).start()
+                    if (!isDangerLongPress) {
+                        v.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        broadcastDangerZone()
+                    }
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    handler.removeCallbacks(dangerLongPressRunnable)
+                    v.animate().scaleX(1.0f).scaleY(1.0f).setDuration(150).start()
+                }
+            }
             true
         }
 
         btnSend.setOnClickListener {
             val msg = etMessage.text.toString()
-            if (msg.isNotEmpty() && connectedEndpoints.isNotEmpty()) {
+            val endpoints = viewModel.connectedEndpoints.value ?: emptySet()
+            if (msg.isNotEmpty() && endpoints.isNotEmpty()) {
                 val sharedPrefs = getSharedPreferences("OFFSOS_PREFS", Context.MODE_PRIVATE)
                 val cbPrivacyChecked = sharedPrefs.getBoolean("incognito_mode", false)
                 val etNameText = sharedPrefs.getString("codename", "") ?: ""
                 val myName = if (cbPrivacyChecked) "Signal-${(100..999).random()}" else etNameText
                 appendChatLog("ME: $msg")
-                sendPayloadToAll(Payload.fromBytes("MSG:$myName:$msg".toByteArray(StandardCharsets.UTF_8)))
+                viewModel.sendMessage(msg, myName)
                 etMessage.setText("")
             } else {
                 Toast.makeText(this, "Not Connected", Toast.LENGTH_SHORT).show()
@@ -287,14 +453,17 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
         btnMic.setOnTouchListener { view, motionEvent ->
             when (motionEvent.action) {
                 MotionEvent.ACTION_DOWN -> {
+                    view.animate().scaleX(0.88f).scaleY(0.88f).setDuration(80).start()
                     view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                     startRecording()
                     tvMic.text = "🔴 REC"
                     appendChatLog("* Recording... *")
                 }
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    view.animate().scaleX(1.0f).scaleY(1.0f).setDuration(160)
+                        .setInterpolator(android.view.animation.OvershootInterpolator(2.0f)).start()
                     stopRecordingAndSend()
-                    tvMic.text = "🎙️\nTalk"
+                    tvMic.text = "Talk"
                     appendChatLog("* Audio Sent *")
                 }
             }
@@ -426,26 +595,29 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
     }
 
     private fun broadcastDangerZone() {
-        if (myLastLocation == null) return
+        if (myLastLocation == null) {
+            Toast.makeText(this, "Waiting for Location...", Toast.LENGTH_SHORT).show()
+            return
+        }
         val lat = myLastLocation!!.latitude
         val lon = myLastLocation!!.longitude
         drawDangerZone(lat, lon)
-        if (connectedEndpoints.isNotEmpty()) {
-            val dangerPayload = "DANGER:$lat,$lon"
-            sendPayloadToAll(Payload.fromBytes(dangerPayload.toByteArray(StandardCharsets.UTF_8)))
+        val endpoints = viewModel.connectedEndpoints.value ?: emptySet()
+        if (endpoints.isNotEmpty()) {
+            viewModel.broadcastDangerZone(lat, lon)
             Toast.makeText(this, "Danger Zone Broadcasted!", Toast.LENGTH_SHORT).show()
         } else {
-            Toast.makeText(this, "Marked locally", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "Danger Zone Marked Locally", Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun broadcastSafeZone() {
         clearAllDangerZones()
-        if (connectedEndpoints.isNotEmpty()) {
-            val safePayload = "SAFE:ALL"
-            sendPayloadToAll(Payload.fromBytes(safePayload.toByteArray(StandardCharsets.UTF_8)))
-            Toast.makeText(this, "Cleared All Danger Zones!", Toast.LENGTH_SHORT).show()
+        val endpoints = viewModel.connectedEndpoints.value ?: emptySet()
+        if (endpoints.isNotEmpty()) {
+            viewModel.broadcastSafeZone()
         }
+        Toast.makeText(this, "Cleared All Danger Zones!", Toast.LENGTH_SHORT).show()
     }
 
     private fun drawDangerZone(centerLat: Double, centerLon: Double) {
@@ -462,13 +634,13 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
         dangerPolygon.outlinePaint.strokeWidth = 3f
         dangerPolygon.title = "DANGER ZONE"
         map.overlays.add(dangerPolygon)
-        dangerZones.add(dangerPolygon)
+        dangerPolygons.add(dangerPolygon)
         map.invalidate()
     }
 
     private fun clearAllDangerZones() {
-        for (polygon in dangerZones) { map.overlays.remove(polygon) }
-        dangerZones.clear()
+        for (polygon in dangerPolygons) { map.overlays.remove(polygon) }
+        dangerPolygons.clear()
         map.invalidate()
     }
 
@@ -509,11 +681,12 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
                 lastAudioFile = audioFile
                 lastAudioUri = null
                 runOnUiThread { btnPlayAudio.visibility = View.VISIBLE }
-                if (connectedEndpoints.isNotEmpty()) {
+                val endpoints = viewModel.connectedEndpoints.value ?: emptySet()
+                if (endpoints.isNotEmpty()) {
                     try {
                         val pfd = ParcelFileDescriptor.open(audioFile, ParcelFileDescriptor.MODE_READ_ONLY)
                         val filePayload = Payload.fromFile(pfd)
-                        sendPayloadToAll(filePayload)
+                        viewModel.sendFilePayload(filePayload)
                     } catch (e: Exception) { }
                 }
             } else {
@@ -558,44 +731,50 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
         map.controller.setCenter(GeoPoint(28.6139, 77.2090))
     }
 
+    // --- SOS MODE (Advertising vs Discovery) ---
     private fun toggleSosMode() {
+        val sharedPrefs = getSharedPreferences("OFFSOS_PREFS", Context.MODE_PRIVATE)
+        var channel = sharedPrefs.getString("channel", "PUBLIC") ?: "PUBLIC"
+        if (channel.isEmpty()) channel = "PUBLIC"
+        channel = channel.uppercase().trim()
+        val cbPrivacyChecked = sharedPrefs.getBoolean("incognito_mode", false)
+        val etNameText = sharedPrefs.getString("codename", "") ?: ""
+        val rawName = if (cbPrivacyChecked) "Signal-${(100..999).random()}" else etNameText
+
         if (isBroadcasting) {
             isBroadcasting = false
             tvSosText.text = "SOS"
-            cardSos.setCardBackgroundColor(Color.parseColor("#B71C1C"))
-            tvStatus.text = "🟢 ONLINE"
-            tvStatus.setTextColor(Color.WHITE)
-            stopAdvertising()
-            startDiscovery()
+            sosGlow.setBackgroundResource(R.drawable.bg_sos_ring)
+            sosContainer.setBackgroundResource(R.drawable.bg_sos_fill)
+            val endpoints = viewModel.connectedEndpoints.value ?: emptySet()
+            tvStatus.text = "🟢 ONLINE • ${endpoints.size} peers"
+            tvStatus.setTextColor(ContextCompat.getColor(this, R.color.text_primary))
+            viewModel.toggleSosMode(channel, rawName)
         } else {
             isBroadcasting = true
             tvSosText.text = "STOP"
-            cardSos.setCardBackgroundColor(Color.DKGRAY)
+            sosGlow.setBackgroundResource(R.drawable.bg_sos_ring_active)
+            sosContainer.setBackgroundResource(R.drawable.bg_sos_fill_active)
             tvStatus.text = "🔴 BROADCASTING"
-            tvStatus.setTextColor(Color.RED)
-            stopDiscovery()
-            startAdvertising()
+            tvStatus.setTextColor(ContextCompat.getColor(this, R.color.primary_sos_red))
+            viewModel.toggleSosMode(channel, rawName)
         }
     }
 
+    // --- Location sending loop (guarded — only one instance runs) ---
     private val sendLocationRunnable = object : Runnable {
         override fun run() {
             updateMyLocation()
-            if (connectedEndpoints.isNotEmpty() && myLastLocation != null) {
+            val endpoints = viewModel.connectedEndpoints.value ?: emptySet()
+            if (endpoints.isNotEmpty() && myLastLocation != null) {
                 val sharedPrefs = getSharedPreferences("OFFSOS_PREFS", Context.MODE_PRIVATE)
                 val cbPrivacyChecked = sharedPrefs.getBoolean("incognito_mode", false)
                 val etNameText = sharedPrefs.getString("codename", "") ?: ""
                 val myName = if (cbPrivacyChecked) "Signal-${(100..999).random()}" else etNameText
-                val payload = "LOC:${myLastLocation!!.latitude},${myLastLocation!!.longitude},$myName"
-                sendPayloadToAll(Payload.fromBytes(payload.toByteArray(StandardCharsets.UTF_8)))
+                viewModel.sendLocation(myLastLocation!!.latitude, myLastLocation!!.longitude, myName)
             }
+            // Keep running even if no endpoints currently — we might reconnect
             handler.postDelayed(this, 3000)
-        }
-    }
-
-    private fun sendPayloadToAll(payload: Payload) {
-        for (endpointId in connectedEndpoints) {
-            connectionsClient.sendPayload(endpointId, payload)
         }
     }
 
@@ -650,141 +829,7 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
         tvChatLog.append("\n$msg")
     }
 
-    // --- CONNECTION LOGIC ---
-    private fun startAdvertising() {
-        val options = AdvertisingOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
-        val sharedPrefs = getSharedPreferences("OFFSOS_PREFS", Context.MODE_PRIVATE)
-        var channel = sharedPrefs.getString("channel", "PUBLIC") ?: "PUBLIC"
-        if (channel.isEmpty()) channel = "PUBLIC"
-        channel = channel.uppercase().trim()
-        val cbPrivacyChecked = sharedPrefs.getBoolean("incognito_mode", false)
-        val etNameText = sharedPrefs.getString("codename", "") ?: ""
-        val rawName = if (cbPrivacyChecked) "Signal-${(100..999).random()}" else etNameText
-        val broadcastName = "$channel|$rawName"
-        connectionsClient.startAdvertising(broadcastName, SERVICE_ID, connectionLifecycleCallback, options)
-    }
-
-    private fun startDiscovery() {
-        val options = DiscoveryOptions.Builder().setStrategy(Strategy.P2P_CLUSTER).build()
-        connectionsClient.startDiscovery(SERVICE_ID, endpointDiscoveryCallback, options)
-    }
-
-    private fun stopAdvertising() = connectionsClient.stopAdvertising()
-    private fun stopDiscovery() = connectionsClient.stopDiscovery()
-
-    private val endpointDiscoveryCallback = object : EndpointDiscoveryCallback() {
-        override fun onEndpointFound(endpointId: String, info: DiscoveredEndpointInfo) {
-            val foundName = info.endpointName
-            Toast.makeText(applicationContext, "Found Signal: $foundName", Toast.LENGTH_SHORT).show()
-            val sharedPrefs = getSharedPreferences("OFFSOS_PREFS", Context.MODE_PRIVATE)
-            var myChannel = sharedPrefs.getString("channel", "PUBLIC") ?: "PUBLIC"
-            if (myChannel.isEmpty()) myChannel = "PUBLIC"
-            myChannel = myChannel.uppercase().trim()
-            val etNameText = sharedPrefs.getString("codename", "") ?: ""
-            val remoteInfo = foundName.split("|", limit = 2)
-            if (remoteInfo.size == 2) {
-                val remoteChannel = remoteInfo[0].uppercase().trim()
-                if (remoteChannel == myChannel) {
-                    Toast.makeText(applicationContext, "Match! Connecting...", Toast.LENGTH_SHORT).show()
-                    connectionsClient.requestConnection(etNameText, endpointId, connectionLifecycleCallback)
-                }
-            } else {
-                if (myChannel == "PUBLIC") connectionsClient.requestConnection(etNameText, endpointId, connectionLifecycleCallback)
-            }
-        }
-        override fun onEndpointLost(endpointId: String) {}
-    }
-
-    private val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
-        override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
-            connectionsClient.acceptConnection(endpointId, payloadCallback)
-        }
-        override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
-            if (result.status.isSuccess) {
-                connectedEndpoints.add(endpointId)
-                btnSos.playSoundEffect(SoundEffectConstants.NAVIGATION_UP)
-                Toast.makeText(applicationContext, "MESH CONNECTED", Toast.LENGTH_SHORT).show()
-                handler.post(sendLocationRunnable)
-                if (!isBroadcasting) triggerRescuerAlarm(endpointId)
-            }
-        }
-        override fun onDisconnected(endpointId: String) {
-            connectedEndpoints.remove(endpointId)
-            activeMarkers[endpointId]?.let { map.overlays.remove(it) }
-            activeMarkers.remove(endpointId)
-            map.invalidate()
-            Toast.makeText(applicationContext, "Signal Lost", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    private val payloadCallback = object : PayloadCallback() {
-        override fun onPayloadReceived(endpointId: String, payload: Payload) {
-            if (payload.type == Payload.Type.BYTES) {
-                val data = String(payload.asBytes()!!, StandardCharsets.UTF_8)
-                runOnUiThread {
-                    if (data.startsWith("LOC:")) {
-                        try {
-                            val parts = data.substring(4).split(",")
-                            updateRemoteUserMarker(endpointId, parts[0].toDouble(), parts[1].toDouble(), if (parts.size > 2) parts[2] else "Unknown")
-                        } catch (e: Exception) { }
-                    } else if (data.startsWith("MSG:")) {
-                        try {
-                            val parts = data.split(":", limit = 3)
-                            appendChatLog("${parts[1]}: ${parts[2]}")
-                            if (!isChatMode) Toast.makeText(applicationContext, "Msg from ${parts[1]}", Toast.LENGTH_SHORT).show()
-                        } catch (e: Exception) { }
-                    }
-                    else if (data.startsWith("DANGER:")) {
-                        try {
-                            val parts = data.substring(7).split(",")
-                            val lat = parts[0].toDouble()
-                            val lon = parts[1].toDouble()
-                            drawDangerZone(lat, lon)
-                            Toast.makeText(applicationContext, "⚠️ DANGER ZONE RECEIVED!", Toast.LENGTH_LONG).show()
-                        } catch (e: Exception) { e.printStackTrace() }
-                    }
-                    else if (data.startsWith("SAFE:")) {
-                        clearAllDangerZones()
-                        Toast.makeText(applicationContext, "Danger Zone Cleared", Toast.LENGTH_SHORT).show()
-                    }
-                }
-            }
-            else if (payload.type == Payload.Type.FILE) {
-                incomingFilePayloads.put(payload.id, payload)
-                runOnUiThread { appendChatLog("* Receiving Audio... *") }
-            }
-        }
-        override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
-            if (update.status == PayloadTransferUpdate.Status.SUCCESS) {
-                val payload = incomingFilePayloads.get(update.payloadId)
-                if (payload != null && payload.type == Payload.Type.FILE) {
-                    val file = payload.asFile()?.asJavaFile()
-                    val uri = payload.asFile()?.asUri()
-                    if (file != null && file.exists()) {
-                        lastAudioFile = file
-                        lastAudioUri = null
-                        runOnUiThread {
-                            btnPlayAudio.visibility = View.VISIBLE
-                            appendChatLog("* Audio Received! *")
-                            playReceivedAudio(file, null)
-                        }
-                    } else if (uri != null) {
-                        lastAudioUri = uri
-                        lastAudioFile = null
-                        runOnUiThread {
-                            btnPlayAudio.visibility = View.VISIBLE
-                            appendChatLog("* Audio Received! *")
-                            playReceivedAudio(null, uri)
-                        }
-                    } else {
-                        runOnUiThread { appendChatLog("* Failed to process audio *") }
-                    }
-                    incomingFilePayloads.remove(update.payloadId)
-                }
-            }
-        }
-    }
-
+    // --- PERMISSIONS ---
     private fun hasPermissions(context: Context, vararg permissions: String): Boolean {
         for (permission in REQUIRED_PERMISSIONS) {
             if (ContextCompat.checkSelfPermission(context, permission) != PackageManager.PERMISSION_GRANTED) return false
@@ -795,11 +840,15 @@ class MainActivity : AppCompatActivity(), SettingsBottomSheet.SettingsListener {
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-            startDiscovery()
+            val sharedPrefs = getSharedPreferences("OFFSOS_PREFS", Context.MODE_PRIVATE)
+            val channel = (sharedPrefs.getString("channel", "PUBLIC") ?: "PUBLIC").uppercase().trim().ifEmpty { "PUBLIC" }
+            val name = sharedPrefs.getString("codename", "") ?: ""
+            viewModel.startDiscovery(channel, name)
             updateMyLocation()
         }
     }
 
+    // --- SETTINGS CALLBACKS ---
     override fun onFlareClicked() {
         startDigitalFlare()
     }

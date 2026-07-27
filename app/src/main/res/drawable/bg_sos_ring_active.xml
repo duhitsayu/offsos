@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Outer glow ring — red -->
+    <item>
+        <shape android:shape="oval">
+            <gradient
+                android:type="radial"
+                android:gradientRadius="60dp"
+                android:centerX="0.5"
+                android:centerY="0.5"
+                android:startColor="@color/sos_glow"
+                android:endColor="@android:color/transparent"/>
+        </shape>
+    </item>
+    <!-- Inner ring stroke — red -->
+    <item
+        android:left="8dp"
+        android:top="8dp"
+        android:right="8dp"
+        android:bottom="8dp">
+        <shape android:shape="oval">
+            <stroke
+                android:width="3dp"
+                android:color="@color/primary_sos_red"/>
+            <solid android:color="@android:color/transparent"/>
+        </shape>
+    </item>
+</layer-list>
