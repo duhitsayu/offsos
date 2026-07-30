@@ -302,6 +302,6 @@ appears in all copies.
 
 <br>
 
-*OffSOS — Because emergencies don't wait for signal.*
+*OffSOS - Because emergencies don't wait for signal.*
 
 </div>
