@@ -1,0 +1,93 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Outer Tactical Hexagonal Shield Frame (Black & White) -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="1.8"
+        android:strokeLineJoin="round"
+        android:fillColor="#0D0D0D"
+        android:pathData="M 54,14 L 86,32 L 86,72 L 54,92 L 22,72 L 22,32 Z" />
+
+    <!-- Corner Accents / Tactical Brackets (Crisp White) -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M 44,19.5 L 54,14 L 64,19.5" />
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M 44,87 L 54,92 L 64,87" />
+
+    <!-- Radio Waves / Propagation Arcs (Monochrome High Contrast) -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M 36,36 C 41,31 47,28 54,28 C 61,28 67,31 72,36" />
+    <path
+        android:strokeColor="#B0B0B0"
+        android:strokeWidth="2.0"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M 28,29 C 35,22 44,18 54,18 C 64,18 73,22 80,29" />
+
+    <!-- Mesh Peer Interconnection Links (Silver/White) -->
+    <path
+        android:strokeColor="#757575"
+        android:strokeWidth="1.8"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M 54,48 L 36,66 M 54,48 L 72,66 M 36,66 L 72,66 M 36,66 L 54,78 M 72,66 L 54,78 M 54,48 L 54,78" />
+
+    <!-- SOS Pulse Ring around center (Translucent White) -->
+    <path
+        android:strokeColor="#80FFFFFF"
+        android:strokeWidth="1.5"
+        android:fillColor="#00000000"
+        android:pathData="M 54,39 A 9,9 0 1 1 53.9,39" />
+
+    <!-- Peer Node Left -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 36,66 m -4.5,0 a 4.5,4.5 0 1,0 9,0 a 4.5,4.5 0 1,0 -9,0" />
+    <path
+        android:fillColor="#121212"
+        android:pathData="M 36,66 m -2,0 a 2,2 0 1,0 4,0 a 2,2 0 1,0 -4,0" />
+
+    <!-- Peer Node Right -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 72,66 m -4.5,0 a 4.5,4.5 0 1,0 9,0 a 4.5,4.5 0 1,0 -9,0" />
+    <path
+        android:fillColor="#121212"
+        android:pathData="M 72,66 m -2,0 a 2,2 0 1,0 4,0 a 2,2 0 1,0 -4,0" />
+
+    <!-- Peer Node Bottom Relay -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 54,78 m -4,0 a 4,4 0 1,0 8,0 a 4,4 0 1,0 -8,0" />
+    <path
+        android:fillColor="#121212"
+        android:pathData="M 54,78 m -1.8,0 a 1.8,1.8 0 1,0 3.6,0 a 1.8,1.8 0 1,0 -3.6,0" />
+
+    <!-- Central Emergency Beacon Node (Tactical Inverted High Contrast) -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 54,48 m -7,0 a 7,7 0 1,0 14,0 a 7,7 0 1,0 -14,0" />
+    <path
+        android:fillColor="#000000"
+        android:pathData="M 54,48 m -4,0 a 4,4 0 1,0 8,0 a 4,4 0 1,0 -8,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M 54,48 m -1.8,0 a 1.8,1.8 0 1,0 3.6,0 a 1.8,1.8 0 1,0 -3.6,0" />
+
+</vector>
