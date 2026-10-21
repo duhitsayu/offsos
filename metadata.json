@@ -1,0 +1,6 @@
+{
+  "name": "OFFSOS",
+  "description": "P2P offline mesh SOS network with real-time location sharing, voice & photo group messaging, and one-tap emergency broadcasting.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
